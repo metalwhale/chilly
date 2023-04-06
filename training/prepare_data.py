@@ -3,11 +3,13 @@ import glob
 import json
 import os
 import random
+import re
 import sys
 
 
-CONVERSATION_DISTANCE_TIME = 30  # in seconds
+CONVERSATION_DISTANCE_TIME = 15 * 60  # in seconds
 CONVERSATION_MIN_LENGTH = 2
+TRAIN_VAL_RATIO = (9, 1)
 
 
 class Message:
@@ -26,24 +28,6 @@ class Conversation:
 
     def __init__(self) -> "Conversation":
         self.messages = []
-
-    def append_message(self, message: Message):
-        self.messages.append(message)
-
-    @property
-    def last_message(self) -> Message:
-        return None if len(self.messages) == 0 else self.messages[-1]
-
-
-class Instruction:
-    instruction: str
-    input: str
-    output: str
-
-    def __init__(self, instruction: str, output: str) -> "Instruction":
-        self.instruction = instruction
-        self.input = ""
-        self.output = output
 
 
 def load_workspace_data(input_folder: str) -> list[Conversation]:
@@ -68,36 +52,33 @@ def load_workspace_data(input_folder: str) -> list[Conversation]:
             for message_obj in message_obj_list:
                 if "user" not in message_obj or len(message_obj["text"]) == 0:
                     continue
-                if conversation.last_message is not None:
+                text = re.sub(r"(\n)+", ". ", message_obj["text"])
+                last_message = None if len(conversation.messages) == 0 else conversation.messages[-1]
+                if last_message is not None:
                     if (
                         thread == "main"
-                        and float(message_obj["ts"]) - float(conversation.last_message.ts) > CONVERSATION_DISTANCE_TIME
+                        and float(message_obj["ts"]) - float(last_message.ts) > CONVERSATION_DISTANCE_TIME
                     ):  # Create a new conversation if enough time has passed since the previous message was sent
                         conversations.append(conversation)
                         conversation = Conversation()
-                    elif message_obj["user"] == conversation.last_message.user:
-                        conversation.last_message.text += "\n" + message_obj["text"]
+                    elif message_obj["user"] == last_message.user:
+                        last_message.text += ". " + text
                         continue
-                conversation.append_message(Message(message_obj["text"], message_obj["ts"], message_obj["user"]))
+                conversation.messages.append(Message(text, message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
             conversation = Conversation()
+    conversations = [c for c in conversations if len(c.messages) >= CONVERSATION_MIN_LENGTH]
     return conversations
-
-
-def convert_to_instruction_list(conversations: list[Conversation]) -> list[Instruction]:
-    instructions: list[Instruction] = []
-    for conversation in conversations:
-        messages = conversation.messages
-        if len(messages) < CONVERSATION_MIN_LENGTH:
-            continue
-        instructions.append(Instruction("\n".join([m.text for m in messages[:-1]]), messages[-1].text))
-    random.shuffle(instructions)
-    return instructions
 
 
 if __name__ == "__main__":
     conversations = load_workspace_data(sys.argv[1])
-    instructions = convert_to_instruction_list(conversations)
-    print("Instructions size:", len(instructions))
-    with open(sys.argv[2], "w", encoding="utf8") as instructions_file:
-        json.dump([instruction.__dict__ for instruction in instructions], instructions_file, ensure_ascii=False, indent=4)
+    random.shuffle(conversations)
+    train_length = int(TRAIN_VAL_RATIO[0] / sum(TRAIN_VAL_RATIO) * len(conversations))
+    train_conversations = conversations[:train_length]
+    val_conversations = conversations[train_length:]
+    print("Train length:", len(train_conversations))
+    print("Val length:", len(val_conversations))
+    for name, data in zip(["train", "val"], [train_conversations, val_conversations]):
+        with open(os.path.join(sys.argv[2], f"{name}.json"), "w", encoding="utf8") as data_file:
+            json.dump(["\n".join([m.text for m in d.messages]) for d in data], data_file, ensure_ascii=False, indent=4)
