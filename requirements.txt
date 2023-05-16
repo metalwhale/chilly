@@ -1,0 +1,6 @@
+torch==1.13.1
+transformers==4.28.1
+peft==0.3.0
+bitsandbytes==0.38.1
+datasets==2.12.0
+urllib3==1.26.15 # Fix for old openssl
