@@ -1,10 +1,12 @@
-BASE_MODEL = "bigscience/bloom-3b"
+BASE_MODEL = "decapoda-research/llama-7b-hf"
 ZIP_FILE = "data/slack-export-Mart6-2018-Mar31-2023.zip"
 RAW_DATA_DIR = "data/raw_data"
 TRAIN_FILE = "data/train.json"
 VAL_FILE = "data/val.json"
 OUTPUT_DIR = "data/output"
-EPOCHS = 12
+TRAIN_LENGTH = 16000
+VAL_LENGTH = 2000
+EPOCHS = 4
 
 import shutil
 import zipfile
@@ -39,7 +41,6 @@ class Conversation:
 def generate_dataset(input_dir: str):
     CONVERSATION_DISTANCE_TIME = 15 * 60  # in seconds
     CONVERSATION_MIN_LENGTH = 2
-    TRAIN_VAL_RATIO = (9, 1)
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
         thread_dict = defaultdict(list)
@@ -74,9 +75,8 @@ def generate_dataset(input_dir: str):
             conversation = Conversation()
     conversations = [c for c in conversations if len(c.messages) >= CONVERSATION_MIN_LENGTH]
     random.shuffle(conversations)
-    train_length = int(TRAIN_VAL_RATIO[0] / sum(TRAIN_VAL_RATIO) * len(conversations))
-    train_conversations = conversations[:train_length]
-    val_conversations = conversations[train_length:]
+    train_conversations = conversations[:TRAIN_LENGTH]
+    val_conversations = conversations[TRAIN_LENGTH:TRAIN_LENGTH + VAL_LENGTH]
     for file_name, data in zip([TRAIN_FILE, VAL_FILE], [train_conversations, val_conversations]):
         with open(file_name, "w", encoding="utf8") as data_file:
             json.dump(
@@ -88,9 +88,10 @@ generate_dataset(RAW_DATA_DIR)
 
 import json
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import LlamaTokenizer
 
-tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, model_max_length=2048)
+tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
+tokenizer.pad_token_id = 0
 def load_data(file_path):
     def tokenize(d):
         encoding = tokenizer(d["text"], truncation=True, max_length=256)
@@ -105,10 +106,10 @@ val_data = load_data(VAL_FILE)
 print(len(train_data), len(val_data))
 
 import torch
-from transformers import BloomForCausalLM
+from transformers import LlamaForCausalLM
 from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
 
-model = BloomForCausalLM.from_pretrained(
+model = LlamaForCausalLM.from_pretrained(
     BASE_MODEL,
     load_in_8bit=True,
     torch_dtype=torch.float16,
@@ -116,9 +117,9 @@ model = BloomForCausalLM.from_pretrained(
 )
 model = prepare_model_for_int8_training(model)
 config = LoraConfig(
-    r=16,
+    r=8,
     lora_alpha=16,
-    target_modules=["query_key_value"],
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
@@ -143,8 +144,8 @@ trainer = Trainer(
         optim="adamw_torch",
         evaluation_strategy="steps",
         save_strategy="steps",
-        eval_steps=100,
-        save_steps=100,
+        eval_steps=200,
+        save_steps=200,
         output_dir=OUTPUT_DIR,
         save_total_limit=3,
         load_best_model_at_end=True,
