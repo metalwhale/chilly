@@ -10,7 +10,7 @@ from typing import List
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
+from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, prepare_model_for_int8_training
 from transformers import LlamaForCausalLM, LlamaTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
 BASE_MODEL = "decapoda-research/llama-7b-hf"
@@ -18,11 +18,11 @@ ZIP_FILE = "data/slack-export-Mart6-2018-Mar31-2023.zip"
 RAW_DATA_DIR = "data/raw_data"
 TRAIN_FILE = "data/train.json"
 VAL_FILE = "data/val.json"
-OUTPUT_DIR = "data/output"
-TRAIN_LENGTH = 16000
+MODELS_DIR = "data/models"
+TRAIN_LENGTH = 20000
 VAL_LENGTH = 2000
 EPOCHS = 1
-shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
+shutil.rmtree(MODELS_DIR, ignore_errors=True)
 shutil.rmtree(RAW_DATA_DIR, ignore_errors=True)
 with zipfile.ZipFile(ZIP_FILE, "r") as zip_file:
     zip_file.extractall(RAW_DATA_DIR)
@@ -143,12 +143,17 @@ trainer = Trainer(
         save_strategy="steps",
         eval_steps=200,
         save_steps=200,
-        output_dir=OUTPUT_DIR,
+        output_dir=MODELS_DIR,
         save_total_limit=3,
         load_best_model_at_end=True,
     ),
     data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8),
 )
+model.config.use_cache = False
+old_state_dict = model.state_dict
+model.state_dict = (
+    lambda self, *_, **__: get_peft_model_state_dict(self, old_state_dict())
+).__get__(model, type(model))
 # model = torch.compile(model)
 trainer.train()
-model.save_pretrained(OUTPUT_DIR)
+model.save_pretrained(MODELS_DIR)
