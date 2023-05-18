@@ -5,3 +5,6 @@ bitsandbytes==0.38.1
 datasets==2.12.0
 sentencepiece==0.1.99
 urllib3==1.26.15 # Fix for old openssl
+
+# Development
+autopep8==2.0.2
