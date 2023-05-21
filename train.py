@@ -157,5 +157,6 @@ old_state_dict = model.state_dict
 model.state_dict = (
     lambda self, *_, **__: get_peft_model_state_dict(self, old_state_dict())
 ).__get__(model, type(model))
+model = torch.compile(model)
 trainer.train()
 model.save_pretrained(MODELS_DIR)
