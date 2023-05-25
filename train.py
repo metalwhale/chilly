@@ -10,7 +10,7 @@ from typing import List
 
 import torch
 from datasets import load_dataset
-from peft import LoraConfig, get_peft_model, get_peft_model_state_dict, prepare_model_for_int8_training
+from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
 from transformers import LlamaForCausalLM, LlamaTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
 BASE_MODEL = "decapoda-research/llama-7b-hf"
@@ -19,7 +19,7 @@ RAW_DATA_DIR = "data/raw_data"
 TRAIN_FILE = "data/train.json"
 VAL_FILE = "data/val.json"
 MODELS_DIR = "data/models"
-LORA_RANK = 24
+LORA_RANK = 16
 MICRO_BATCH_SIZE = 4
 TRAIN_LENGTH = 22000
 VAL_LENGTH = 0
@@ -144,8 +144,8 @@ trainer = Trainer(
         optim="adamw_torch",
         evaluation_strategy="steps" if VAL_LENGTH > 0 else "no",
         save_strategy="steps",
-        eval_steps=200 // MICRO_BATCH_SIZE if VAL_LENGTH > 0 else None,
-        save_steps=200 // MICRO_BATCH_SIZE,
+        eval_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE if VAL_LENGTH > 0 else None,
+        save_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE,
         output_dir=MODELS_DIR,
         save_total_limit=2,
         load_best_model_at_end=True if VAL_LENGTH > 0 else False,
@@ -153,10 +153,6 @@ trainer = Trainer(
     data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8),
 )
 model.config.use_cache = False
-old_state_dict = model.state_dict
-model.state_dict = (
-    lambda self, *_, **__: get_peft_model_state_dict(self, old_state_dict())
-).__get__(model, type(model))
 model = torch.compile(model)
 trainer.train()
 model.save_pretrained(MODELS_DIR)
