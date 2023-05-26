@@ -21,7 +21,7 @@ VAL_FILE = "data/val.json"
 MODELS_DIR = "data/models"
 LORA_RANK = 16
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 22000
+TRAIN_LENGTH = 50000
 VAL_LENGTH = 0
 EPOCHS = 2
 
@@ -44,9 +44,9 @@ class Conversation:
         self.messages = []
 
 
-def generate_dataset(input_dir: str):
+def generate_dataset(input_dir: str) -> int:
     CONVERSATION_DISTANCE_TIME = 15 * 60  # In seconds
-    CONVERSATION_MIN_LENGTH = 2
+    CONVERSATION_MIN_LENGTH = 3
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
         thread_dict = defaultdict(list)
@@ -59,26 +59,27 @@ def generate_dataset(input_dir: str):
                         thread_dict[message_obj["thread_ts"]].append(message_obj)
                     elif "subtype" not in message_obj:  # Normal messages. See: https://api.slack.com/events/message#subtypes.
                         thread_dict["main"].append(message_obj)
-        conversation = Conversation()
         for thread, message_obj_list in thread_dict.items():
+            conversation = Conversation()
             for message_obj in message_obj_list:
                 if "user" not in message_obj or len(message_obj["text"]) == 0:
                     continue
-                text = re.sub(r"(\n)+", ". ", message_obj["text"])
+                text: str = message_obj["text"]
+                text = text.rstrip()
+                text = re.sub(r"(\n)+", ", ", text)
+                text += "."
                 last_message = None if len(conversation.messages) == 0 else conversation.messages[-1]
-                if last_message is not None:
-                    if (
-                        thread == "main"
-                        and float(message_obj["ts"]) - float(last_message.ts) > CONVERSATION_DISTANCE_TIME
-                    ):  # Create a new conversation if enough time has passed since the previous message was sent
-                        conversations.append(conversation)
-                        conversation = Conversation()
-                    elif message_obj["user"] == last_message.user:
-                        last_message.text += ". " + text
-                        continue
+                if last_message is not None and ((
+                    thread == "main"
+                    and float(message_obj["ts"]) - float(last_message.ts) > CONVERSATION_DISTANCE_TIME
+                ) or message_obj["user"] != last_message.user):
+                    # Create a new conversation, if enough time has passed since the previous message was sent
+                    # or the current message belongs to another user
+                    # -> A conversation can only contain messages from one user
+                    conversations.append(conversation)
+                    conversation = Conversation()
                 conversation.messages.append(Message(text, message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
-            conversation = Conversation()
     conversations = [c for c in conversations if len(c.messages) >= CONVERSATION_MIN_LENGTH]
     random.shuffle(conversations)
     train_conversations = conversations[:TRAIN_LENGTH]
@@ -86,9 +87,10 @@ def generate_dataset(input_dir: str):
     for file_name, data in zip([TRAIN_FILE, VAL_FILE], [train_conversations, val_conversations]):
         with open(file_name, "w", encoding="utf8") as data_file:
             json.dump(
-                [{"text": "\n".join([m.text for m in d.messages])} for d in data],
+                [{"text": " ".join([m.text for m in d.messages])} for d in data],
                 data_file, ensure_ascii=False, indent=4,
             )
+    return len(conversations)
 
 
 def load_data(file_path, tokenizer):
@@ -106,7 +108,7 @@ shutil.rmtree(MODELS_DIR, ignore_errors=True)
 shutil.rmtree(RAW_DATA_DIR, ignore_errors=True)
 with zipfile.ZipFile(RAW_DATA_FILE, "r") as raw_data_file:
     raw_data_file.extractall(RAW_DATA_DIR)
-generate_dataset(RAW_DATA_DIR)
+print("Number of conversations: ", generate_dataset(RAW_DATA_DIR))
 # Create tokenizer and model
 tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
 tokenizer.pad_token_id = 0
