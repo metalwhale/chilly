@@ -11,7 +11,7 @@ from typing import List
 import torch
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
-from transformers import LlamaForCausalLM, LlamaTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, LlamaTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
 BASE_MODEL = "decapoda-research/llama-7b-hf"
 RAW_DATA_FILE = "data/slack-export-Mart6-2018-Mar31-2023.zip"
@@ -20,6 +20,7 @@ TRAIN_FILE = "data/train.json"
 VAL_FILE = "data/val.json"
 MODELS_DIR = "data/models"
 LORA_RANK = 16
+LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 MICRO_BATCH_SIZE = 4
 TRAIN_LENGTH = 50000
 VAL_LENGTH = 0
@@ -67,7 +68,6 @@ def generate_dataset(input_dir: str) -> int:
                 text: str = message_obj["text"]
                 text = text.rstrip()
                 text = re.sub(r"(\n)+", ", ", text)
-                text += "."
                 last_message = None if len(conversation.messages) == 0 else conversation.messages[-1]
                 if last_message is not None and ((
                     thread == "main"
@@ -87,7 +87,7 @@ def generate_dataset(input_dir: str) -> int:
     for file_name, data in zip([TRAIN_FILE, VAL_FILE], [train_conversations, val_conversations]):
         with open(file_name, "w", encoding="utf8") as data_file:
             json.dump(
-                [{"text": " ".join([m.text for m in d.messages])} for d in data],
+                [{"text": ", ".join([m.text for m in d.messages])} for d in data],
                 data_file, ensure_ascii=False, indent=4,
             )
     return len(conversations)
@@ -112,7 +112,7 @@ print("Number of conversations: ", generate_dataset(RAW_DATA_DIR))
 # Create tokenizer and model
 tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
 tokenizer.pad_token_id = 0
-model = LlamaForCausalLM.from_pretrained(
+model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL,
     load_in_8bit=True,
     torch_dtype=torch.float16,
@@ -122,7 +122,7 @@ model = prepare_model_for_int8_training(model)
 config = LoraConfig(
     r=LORA_RANK,
     lora_alpha=16,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    target_modules=LORA_TARGET_MODULES,
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM",
@@ -140,7 +140,7 @@ trainer = Trainer(
         per_device_train_batch_size=MICRO_BATCH_SIZE,
         gradient_accumulation_steps=32,
         num_train_epochs=EPOCHS,
-        learning_rate=3e-4,
+        learning_rate=1e-4,
         fp16=True,
         logging_steps=10,
         optim="adamw_torch",
