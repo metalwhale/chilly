@@ -22,9 +22,9 @@ MODELS_DIR = "data/models"
 LORA_RANK = 16
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 50000
-VAL_LENGTH = 0
-EPOCHS = 2
+TRAIN_LENGTH = 30000
+VAL_LENGTH = 1000
+EPOCHS = 4
 
 
 class Message:
@@ -47,7 +47,7 @@ class Conversation:
 
 def generate_dataset(input_dir: str) -> int:
     CONVERSATION_DISTANCE_TIME = 15 * 60  # In seconds
-    CONVERSATION_MIN_LENGTH = 3
+    CONVERSATION_MIN_LENGTH = 4
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
         thread_dict = defaultdict(list)
@@ -109,7 +109,8 @@ shutil.rmtree(RAW_DATA_DIR, ignore_errors=True)
 with zipfile.ZipFile(RAW_DATA_FILE, "r") as raw_data_file:
     raw_data_file.extractall(RAW_DATA_DIR)
 print("Number of conversations: ", generate_dataset(RAW_DATA_DIR))
-# Create tokenizer and model
+
+# Create tokenizer, model, trainer and load data
 tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
 tokenizer.pad_token_id = 0
 model = AutoModelForCausalLM.from_pretrained(
@@ -129,7 +130,6 @@ config = LoraConfig(
 )
 model = get_peft_model(model, config)
 model.print_trainable_parameters()
-# Train and save model
 train_data = load_data(TRAIN_FILE, tokenizer)
 val_data = load_data(VAL_FILE, tokenizer)
 trainer = Trainer(
@@ -149,12 +149,14 @@ trainer = Trainer(
         eval_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE if VAL_LENGTH > 0 else None,
         save_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE,
         output_dir=MODELS_DIR,
-        save_total_limit=2,
+        save_total_limit=1,
         load_best_model_at_end=True if VAL_LENGTH > 0 else False,
     ),
     data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8),
 )
 model.config.use_cache = False
 model = torch.compile(model)
+
+# Train and save model
 trainer.train()
 model.save_pretrained(MODELS_DIR)
