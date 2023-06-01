@@ -19,11 +19,12 @@ RAW_DATA_DIR = "data/raw_data"
 TRAIN_FILE = "data/train.json"
 VAL_FILE = "data/val.json"
 MODELS_DIR = "data/models"
-LORA_RANK = 16
+LORA_RANK = 8
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
+BATCH_SIZE = 128
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 30000
-VAL_LENGTH = 1000
+TRAIN_LENGTH = 3000
+VAL_LENGTH = 100
 EPOCHS = 4
 
 
@@ -47,7 +48,7 @@ class Conversation:
 
 def generate_dataset(input_dir: str) -> int:
     CONVERSATION_DISTANCE_TIME = 15 * 60  # In seconds
-    CONVERSATION_MIN_LENGTH = 4
+    TEXT_MIN_LENGTH = 384
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
         thread_dict = defaultdict(list)
@@ -80,17 +81,18 @@ def generate_dataset(input_dir: str) -> int:
                     conversation = Conversation()
                 conversation.messages.append(Message(text, message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
-    conversations = [c for c in conversations if len(c.messages) >= CONVERSATION_MIN_LENGTH]
-    random.shuffle(conversations)
-    train_conversations = conversations[:TRAIN_LENGTH]
-    val_conversations = conversations[TRAIN_LENGTH:TRAIN_LENGTH + VAL_LENGTH]
-    for file_name, data in zip([TRAIN_FILE, VAL_FILE], [train_conversations, val_conversations]):
+    texts = [", ".join([m.text for m in c.messages]) for c in conversations]
+    texts = [t for t in texts if len(t) >= TEXT_MIN_LENGTH]
+    random.shuffle(texts)
+    train_texts = texts[:TRAIN_LENGTH]
+    val_texts = texts[TRAIN_LENGTH:TRAIN_LENGTH + VAL_LENGTH]
+    for file_name, data in zip([TRAIN_FILE, VAL_FILE], [train_texts, val_texts]):
         with open(file_name, "w", encoding="utf8") as data_file:
             json.dump(
-                [{"text": ", ".join([m.text for m in d.messages])} for d in data],
+                [{"text": d} for d in data],
                 data_file, ensure_ascii=False, indent=4,
             )
-    return len(conversations)
+    return len(texts)
 
 
 def load_data(file_path, tokenizer):
@@ -132,13 +134,14 @@ model = get_peft_model(model, config)
 model.print_trainable_parameters()
 train_data = load_data(TRAIN_FILE, tokenizer)
 val_data = load_data(VAL_FILE, tokenizer)
+steps_count = TRAIN_LENGTH // BATCH_SIZE * EPOCHS
 trainer = Trainer(
     model=model,
     train_dataset=train_data,
     eval_dataset=val_data if VAL_LENGTH > 0 else None,
     args=TrainingArguments(
         per_device_train_batch_size=MICRO_BATCH_SIZE,
-        gradient_accumulation_steps=32,
+        gradient_accumulation_steps=BATCH_SIZE // MICRO_BATCH_SIZE,
         num_train_epochs=EPOCHS,
         learning_rate=1e-4,
         fp16=True,
@@ -146,8 +149,8 @@ trainer = Trainer(
         optim="adamw_torch",
         evaluation_strategy="steps" if VAL_LENGTH > 0 else "no",
         save_strategy="steps",
-        eval_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE if VAL_LENGTH > 0 else None,
-        save_steps=TRAIN_LENGTH // 100 // MICRO_BATCH_SIZE,
+        eval_steps=steps_count // 10 if VAL_LENGTH > 0 else None,
+        save_steps=steps_count // 10,
         output_dir=MODELS_DIR,
         save_total_limit=1,
         load_best_model_at_end=True if VAL_LENGTH > 0 else False,
