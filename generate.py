@@ -18,9 +18,10 @@ model = PeftModel.from_pretrained(
     torch_dtype=torch.float16,
 )
 while True:
-    prompt = input("prompt: ")
-    if prompt == "exit":
+    message = input("message: ")
+    if message == "exit":
         break
-    input_ids = tokenizer(prompt, return_tensors="pt")["input_ids"].to("cuda")
+    message = f"This is a short chat between friends in Vietnamese:\n- {message}.\n- "
+    input_ids = tokenizer(message, return_tensors="pt")["input_ids"].to("cuda")
     outputs = tokenizer.batch_decode(model.generate(input_ids=input_ids, max_new_tokens=128))
     print(outputs[0])

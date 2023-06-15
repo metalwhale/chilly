@@ -23,9 +23,9 @@ LORA_RANK = 8
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 BATCH_SIZE = 128
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 3000
-VAL_LENGTH = 100
-EPOCHS = 4
+TRAIN_LENGTH = 58000
+VAL_LENGTH = 1000
+EPOCHS = 2
 
 
 class Message:
@@ -48,7 +48,8 @@ class Conversation:
 
 def generate_dataset(input_dir: str) -> int:
     CONVERSATION_DISTANCE_TIME = 15 * 60  # In seconds
-    TEXT_MIN_LENGTH = 384
+    CONVERSATION_MESSAGES_COUNT = 3
+    TEXT_MAX_LENGTH = 384
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
         thread_dict = defaultdict(list)
@@ -69,20 +70,27 @@ def generate_dataset(input_dir: str) -> int:
                 text: str = message_obj["text"]
                 text = text.rstrip()
                 text = re.sub(r"(\n)+", ", ", text)
+                text += "."
                 last_message = None if len(conversation.messages) == 0 else conversation.messages[-1]
-                if last_message is not None and ((
-                    thread == "main"
-                    and float(message_obj["ts"]) - float(last_message.ts) > CONVERSATION_DISTANCE_TIME
-                ) or message_obj["user"] != last_message.user):
-                    # Create a new conversation, if enough time has passed since the previous message was sent
-                    # or the current message belongs to another user
-                    # -> A conversation can only contain messages from one user
-                    conversations.append(conversation)
-                    conversation = Conversation()
-                conversation.messages.append(Message(text, message_obj["ts"], message_obj["user"]))
+                if last_message is not None:
+                    if (
+                        thread == "main"
+                        and float(message_obj["ts"]) - float(last_message.ts) > CONVERSATION_DISTANCE_TIME
+                    ) or len(conversation.messages) >= CONVERSATION_MESSAGES_COUNT:
+                        # Create a new conversation, if enough time has passed since the previous message was sent
+                        # or the max number of messages has been reached
+                        conversations.append(conversation)
+                        conversation = Conversation()
+                    elif message_obj["user"] == last_message.user:
+                        last_message.text += " " + text
+                        continue
+                conversation.messages.append(Message(f"- {text}", message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
-    texts = [", ".join([m.text for m in c.messages]) for c in conversations]
-    texts = [t for t in texts if len(t) >= TEXT_MIN_LENGTH]
+    texts = [
+        "This is a short chat between friends in Vietnamese:\n" + "\n".join([m.text for m in c.messages])
+        for c in conversations if len(c.messages) == CONVERSATION_MESSAGES_COUNT
+    ]
+    texts = [t for t in texts if len(t) < TEXT_MAX_LENGTH]
     random.shuffle(texts)
     train_texts = texts[:TRAIN_LENGTH]
     val_texts = texts[TRAIN_LENGTH:TRAIN_LENGTH + VAL_LENGTH]
