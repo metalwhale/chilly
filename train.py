@@ -23,7 +23,7 @@ LORA_RANK = 8
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 BATCH_SIZE = 128
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 58000
+TRAIN_LENGTH = 56000
 VAL_LENGTH = 1000
 EPOCHS = 1
 
@@ -88,7 +88,12 @@ def generate_dataset(input_dir: str) -> int:
                     elif message_obj["user"] == last_message.user:
                         last_message.text += " " + text
                         continue
-                conversation.messages.append(Message(f"- {text}", message_obj["ts"], message_obj["user"]))
+                user_name = "Chilly"
+                if "user_profile" in message_obj:
+                    user_name = message_obj["user_profile"]["display_name"]
+                    if user_name == "":
+                        user_name = message_obj["user_profile"]["real_name"]
+                conversation.messages.append(Message(f"- {user_name}: {text}", message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
     texts = [
         "This is a short chat between friends in Vietnamese:\n" + "\n".join([m.text for m in c.messages])
