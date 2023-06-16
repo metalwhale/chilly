@@ -1,13 +1,18 @@
+import sys
+
 import torch
 from peft import PeftModel
 from transformers import LlamaForCausalLM, LlamaTokenizer
 
-BASE_MODEL = "decapoda-research/llama-7b-hf"
 MODELS_DIR = "data/models"
 
-tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
+base_model = "decapoda-research/llama-7b-hf"
+if len(sys.argv) >= 2:
+    base_model = sys.argv[1]
+
+tokenizer = LlamaTokenizer.from_pretrained(base_model)
 model = LlamaForCausalLM.from_pretrained(
-    BASE_MODEL,
+    base_model,
     load_in_8bit=True,
     torch_dtype=torch.float16,
     device_map="auto",

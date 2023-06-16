@@ -3,6 +3,7 @@ import os
 import random
 import re
 import shutil
+import sys
 import json
 import zipfile
 from collections import defaultdict
@@ -13,7 +14,6 @@ from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, prepare_model_for_int8_training
 from transformers import AutoModelForCausalLM, LlamaTokenizer, DataCollatorForSeq2Seq, Trainer, TrainingArguments
 
-BASE_MODEL = "decapoda-research/llama-7b-hf"
 RAW_DATA_FILE = "data/slack-export-Mart6-2018-Mar31-2023.zip"
 RAW_DATA_DIR = "data/raw_data"
 TRAIN_FILE = "data/train.json"
@@ -25,7 +25,11 @@ BATCH_SIZE = 128
 MICRO_BATCH_SIZE = 4
 TRAIN_LENGTH = 58000
 VAL_LENGTH = 1000
-EPOCHS = 2
+EPOCHS = 1
+
+base_model = "decapoda-research/llama-7b-hf"
+if len(sys.argv) >= 2:
+    base_model = sys.argv[1]
 
 
 class Message:
@@ -121,10 +125,10 @@ with zipfile.ZipFile(RAW_DATA_FILE, "r") as raw_data_file:
 print("Number of conversations: ", generate_dataset(RAW_DATA_DIR))
 
 # Create tokenizer, model, trainer and load data
-tokenizer = LlamaTokenizer.from_pretrained(BASE_MODEL)
+tokenizer = LlamaTokenizer.from_pretrained(base_model)
 tokenizer.pad_token_id = 0
 model = AutoModelForCausalLM.from_pretrained(
-    BASE_MODEL,
+    base_model,
     load_in_8bit=True,
     torch_dtype=torch.float16,
     device_map="auto",
@@ -161,7 +165,7 @@ trainer = Trainer(
         save_steps=steps_count // 10,
         output_dir=MODELS_DIR,
         save_total_limit=1,
-        load_best_model_at_end=True if VAL_LENGTH > 0 else False,
+        load_best_model_at_end=False,  # See: https://github.com/huggingface/peft/issues/394
     ),
     data_collator=DataCollatorForSeq2Seq(tokenizer, pad_to_multiple_of=8),
 )
