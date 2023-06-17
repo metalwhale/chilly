@@ -23,7 +23,7 @@ LORA_RANK = 8
 LORA_TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj"]
 BATCH_SIZE = 128
 MICRO_BATCH_SIZE = 4
-TRAIN_LENGTH = 56000
+TRAIN_LENGTH = 32000
 VAL_LENGTH = 1000
 EPOCHS = 1
 
@@ -52,7 +52,7 @@ class Conversation:
 
 def generate_dataset(input_dir: str) -> int:
     CONVERSATION_DISTANCE_TIME = 15 * 60  # In seconds
-    CONVERSATION_MESSAGES_COUNT = 3
+    CONVERSATION_MESSAGES_COUNT = 4
     TEXT_MAX_LENGTH = 384
     conversations: list[Conversation] = []
     for channel in next(os.walk(input_dir))[1]:  # List all subdirectories
@@ -88,15 +88,10 @@ def generate_dataset(input_dir: str) -> int:
                     elif message_obj["user"] == last_message.user:
                         last_message.text += " " + text
                         continue
-                user_name = "Chilly"
-                if "user_profile" in message_obj:
-                    user_name = message_obj["user_profile"]["display_name"]
-                    if user_name == "":
-                        user_name = message_obj["user_profile"]["real_name"]
-                conversation.messages.append(Message(f"- {user_name}: {text}", message_obj["ts"], message_obj["user"]))
+                conversation.messages.append(Message(text, message_obj["ts"], message_obj["user"]))
             conversations.append(conversation)
     texts = [
-        "This is a short chat between friends in Vietnamese:\n" + "\n".join([m.text for m in c.messages])
+        "\n".join([f"{'User' if i % 2 == 0 else 'Chilly'}: {m.text}" for i, m in enumerate(c.messages)])
         for c in conversations if len(c.messages) == CONVERSATION_MESSAGES_COUNT
     ]
     texts = [t for t in texts if len(t) < TEXT_MAX_LENGTH]

@@ -26,7 +26,7 @@ while True:
     message = input("message: ")
     if message == "exit":
         break
-    message = f"This is a short chat between friends in Vietnamese:\n- {message}.\n- "
+    message = f"User: {message}.\nChilly: "
     input_ids = tokenizer(message, return_tensors="pt")["input_ids"].to("cuda")
     outputs = tokenizer.batch_decode(model.generate(input_ids=input_ids, max_new_tokens=128))
     print(outputs[0])
