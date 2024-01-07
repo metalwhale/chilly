@@ -1,0 +1,8 @@
+version: "3"
+services:
+  chilly:
+    build: ./
+    volumes:
+      - ./:/usr/src/chilly/
+    tty: true
+    working_dir: /usr/src/chilly
